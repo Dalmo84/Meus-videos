@@ -284,13 +284,33 @@
     }
   });
 
+  function montarEmbedYoutube(url){
+    // Detecta se é um vídeo único, uma playlist, ou os dois (vídeo dentro de playlist)
+    var listId = null, videoId = null;
+    try {
+      var u = new URL(url);
+      listId = u.searchParams.get('list');
+      videoId = u.searchParams.get('v');
+      if(!videoId && /youtu\.be$/.test(u.hostname)){
+        videoId = u.pathname.replace('/', '');
+      }
+    } catch(e){ /* URL não pôde ser parseada, cai no fallback abaixo */ }
+
+    if(videoId){
+      return 'https://www.youtube.com/embed/'+videoId+(listId ? ('?list='+listId+'&autoplay=1&fs=1&rel=0') : '?autoplay=1&fs=1&rel=0');
+    }
+    if(listId){
+      return 'https://www.youtube.com/embed/videoseries?list='+listId+'&autoplay=1&fs=1&rel=0';
+    }
+    return 'https://www.youtube.com/embed/'+extrairIdYoutube(url)+'?autoplay=1&fs=1&rel=0';
+  }
+
   function abrirPlayer(v){
     playerTitle.textContent = v.title || '';
     playerArea.innerHTML = '';
     if(v.type === 'youtube'){
-      var id = extrairIdYoutube(v.url);
       var iframe = document.createElement('iframe');
-      iframe.src = 'https://www.youtube.com/embed/'+id+'?autoplay=1&fs=1&rel=0';
+      iframe.src = montarEmbedYoutube(v.url);
       iframe.setAttribute('allow','autoplay; encrypted-media; fullscreen');
       iframe.setAttribute('allowfullscreen','');
       playerArea.appendChild(iframe);
