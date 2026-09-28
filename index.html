@@ -115,6 +115,8 @@
   }
   #btnVoltar:focus{outline:none; box-shadow:var(--focus); border-color:var(--accent)}
   #playerTitle{font-size:16px; color:var(--muted)}
+  .voltarCard{display:flex;align-items:center;justify-content:center;min-height:120px;padding:16px;color:var(--accent);font-weight:700;font-size:18px;text-align:center}
+  .aviso{grid-column:1/-1;color:var(--muted);font-size:15px;padding:0 4px}
 </style>
 </head>
 <body>
@@ -149,6 +151,7 @@
   <div id="playerArea"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
 <script>
 (function(){
   var grid = document.getElementById('grid');
@@ -163,8 +166,14 @@
   var btnVoltar = document.getElementById('btnVoltar');
 
   var STORAGE_KEY = 'meusvideos_config_url';
-  var focusables = []; // grade de navegação atual
+  var MAX_CANAIS = 300;
+  var focusables = [];
   var cols = 1;
+  var listaPrincipal = [];
+  var emCanais = false;
+  var hlsAtual = null;
+  var ultimoFoco = null;
+  var tituloAtual = '';
 
   function getConfigUrl(){
     try { return localStorage.getItem(STORAGE_KEY) || ''; } catch(e){ return ''; }
@@ -215,9 +224,47 @@
     return m ? m[1] : url;
   }
 
-  function renderGrid(videos){
+  // ---------- Grade ----------
+  function renderGrid(videos, modoCanais, total){
     grid.innerHTML = '';
     focusables = [];
+
+    var obs = null;
+    if('IntersectionObserver' in window){
+      obs = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if(en.isIntersecting){
+            var el = en.target;
+            if(el.getAttribute('data-bg')){
+              el.style.backgroundImage = 'url("'+el.getAttribute('data-bg')+'")';
+              el.removeAttribute('data-bg');
+            }
+            obs.unobserve(el);
+          }
+        });
+      }, {rootMargin:'400px'});
+    }
+
+    if(modoCanais){
+      var back = document.createElement('div');
+      back.className = 'card voltarCard';
+      back.setAttribute('tabindex','0');
+      back.setAttribute('role','button');
+      back.textContent = '‹ Voltar para minha lista';
+      back.addEventListener('click', voltarCanais);
+      back.addEventListener('keydown', function(e){
+        if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); voltarCanais(); }
+      });
+      grid.appendChild(back);
+      focusables.push(back);
+      if(total && total > videos.length){
+        var aviso = document.createElement('div');
+        aviso.className = 'aviso';
+        aviso.textContent = 'Mostrando os primeiros '+videos.length+' de '+total+' canais.';
+        grid.appendChild(aviso);
+      }
+    }
+
     videos.forEach(function(v){
       var card = document.createElement('div');
       card.className = 'card';
@@ -227,7 +274,9 @@
       var thumb = document.createElement('div');
       thumb.className = 'thumb';
       if(v.thumbnail){
-        thumb.style.backgroundImage = 'url("'+v.thumbnail+'")';
+        var bg = v.thumbnail.replace(/"/g,'%22');
+        if(obs){ thumb.setAttribute('data-bg', bg); obs.observe(thumb); }
+        else { thumb.style.backgroundImage = 'url("'+bg+'")'; }
       } else {
         thumb.innerHTML = '<span class="ph">sem capa</span>';
       }
@@ -235,7 +284,7 @@
 
       var badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = (v.type === 'youtube') ? 'YouTube' : 'Vídeo';
+      badge.textContent = (v.type === 'youtube') ? 'YouTube' : (ehLista(v) ? 'Lista' : 'Vídeo');
       card.appendChild(badge);
 
       var title = document.createElement('div');
@@ -243,34 +292,37 @@
       title.textContent = v.title || 'Sem título';
       card.appendChild(title);
 
-      card.addEventListener('click', function(){ abrirPlayer(v); });
+      card.addEventListener('click', function(){ abrirItem(v); });
       card.addEventListener('keydown', function(e){
-        if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); abrirPlayer(v); }
+        if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); abrirItem(v); }
       });
 
       grid.appendChild(card);
       focusables.push(card);
     });
 
-    // calcula quantas colunas existem de fato, pra navegação com setas
     setTimeout(function(){
-      if(focusables.length < 2){ cols = 1; return; }
-      var topoFirst = focusables[0].offsetTop;
-      cols = 1;
-      for(var i=1;i<focusables.length;i++){
-        if(focusables[i].offsetTop !== topoFirst){ cols = i; break; }
+      if(focusables.length < 2){ cols = 1; }
+      else {
+        var topoFirst = focusables[0].offsetTop;
+        cols = 1;
+        for(var i=1;i<focusables.length;i++){
+          if(focusables[i].offsetTop !== topoFirst){ cols = i; break; }
+        }
       }
-      focusables[0].focus();
+      var alvoFoco = modoCanais && focusables.length > 1 ? focusables[1] : focusables[0];
+      if(alvoFoco) alvoFoco.focus();
     }, 30);
   }
 
-  // Navegação por setas do controle remoto na grade
   document.addEventListener('keydown', function(e){
     if(!configScreen.classList.contains('hide')) return;
+    var isBack = (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack');
     if(!playerScreen.classList.contains('hide')){
-      if(e.key === 'Escape' || e.key === 'Backspace'){ fecharPlayer(); }
+      if(isBack){ e.preventDefault(); fecharPlayer(); }
       return;
     }
+    if(isBack && emCanais){ e.preventDefault(); voltarCanais(); return; }
     var idx = focusables.indexOf(document.activeElement);
     if(idx === -1) return;
     var alvo = -1;
@@ -284,8 +336,66 @@
     }
   });
 
+  // ---------- Listas M3U ----------
+  function ehLista(v){
+    return v.type === 'm3u' || /\.m3u(\?|#|$)/i.test(v.url || '');
+  }
+
+  function parseM3U(texto){
+    var linhas = texto.split(/\r?\n/), lista = [], atual = null;
+    linhas.forEach(function(l){
+      l = l.trim();
+      if(!l) return;
+      if(l.indexOf('#EXTINF') === 0){
+        var nome = l.split(',').slice(1).join(',').trim();
+        var logo = (l.match(/tvg-logo="([^"]*)"/) || [])[1] || '';
+        atual = { title: nome || 'Canal', thumbnail: logo, type: 'direct' };
+      } else if(l.charAt(0) !== '#'){
+        if(atual){ atual.url = l; lista.push(atual); atual = null; }
+        else { lista.push({ title: l.split('/').pop() || 'Vídeo', thumbnail: '', url: l, type: 'direct' }); }
+      }
+    });
+    return lista;
+  }
+
+  function abrirItem(v){
+    ultimoFoco = document.activeElement;
+    if(ehLista(v)) abrirLista(v); else abrirPlayer(v);
+  }
+
+  function abrirLista(v){
+    msgVazio('Carregando canais…', null);
+    fetch(v.url, {cache:'no-store'})
+      .then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.text(); })
+      .then(function(texto){
+        if(texto.indexOf('#EXT-X-') !== -1){
+          // é um stream HLS (.m3u8), não uma lista de canais
+          renderGrid(listaPrincipal);
+          abrirPlayer({title: v.title, url: v.url, type: 'direct'});
+          return;
+        }
+        var canais = parseM3U(texto);
+        if(!canais.length) throw new Error('vazia');
+        emCanais = true;
+        try { history.pushState({c:1}, ''); } catch(e){}
+        renderGrid(canais.slice(0, MAX_CANAIS), true, canais.length);
+      })
+      .catch(function(){
+        emCanais = false;
+        msgVazio('Não foi possível abrir essa lista. O link pode estar errado ou o servidor não permite o acesso.', 'Voltar', function(){ renderGrid(listaPrincipal); });
+      });
+  }
+
+  function sairCanais(){
+    emCanais = false;
+    renderGrid(listaPrincipal);
+  }
+  function voltarCanais(){
+    if(history.state && history.state.c){ history.back(); } else { sairCanais(); }
+  }
+
+  // ---------- Player ----------
   function montarEmbedYoutube(url){
-    // Detecta se é um vídeo único, uma playlist, ou os dois (vídeo dentro de playlist)
     var listId = null, videoId = null;
     try {
       var u = new URL(url);
@@ -294,8 +404,7 @@
       if(!videoId && /youtu\.be$/.test(u.hostname)){
         videoId = u.pathname.replace('/', '');
       }
-    } catch(e){ /* URL não pôde ser parseada, cai no fallback abaixo */ }
-
+    } catch(e){}
     if(videoId){
       return 'https://www.youtube.com/embed/'+videoId+(listId ? ('?list='+listId+'&autoplay=1&fs=1&rel=0') : '?autoplay=1&fs=1&rel=0');
     }
@@ -305,8 +414,44 @@
     return 'https://www.youtube.com/embed/'+extrairIdYoutube(url)+'?autoplay=1&fs=1&rel=0';
   }
 
+  function tocarDireto(url){
+    var video = document.createElement('video');
+    video.controls = true;
+    video.autoplay = true;
+    video.setAttribute('playsinline','');
+    playerArea.appendChild(video);
+
+    var usouHls = false;
+    function usarHls(){
+      if(window.Hls && Hls.isSupported()){
+        usouHls = true;
+        hlsAtual = new Hls();
+        hlsAtual.on(Hls.Events.ERROR, function(ev, data){ if(data && data.fatal) falhou(); });
+        hlsAtual.loadSource(url);
+        hlsAtual.attachMedia(video);
+        return true;
+      }
+      return false;
+    }
+    function falhou(){
+      var dica = /^http:/i.test(url) ? ' (links http:// podem ser bloqueados)' : '';
+      playerTitle.textContent = tituloAtual + ' — não foi possível reproduzir este link' + dica;
+    }
+
+    if(/\.m3u8(\?|#|$)/i.test(url)){
+      if(!usarHls()) video.src = url;
+    } else {
+      video.src = url;
+    }
+    video.addEventListener('error', function(){
+      if(!usouHls && usarHls()) return;
+      falhou();
+    });
+  }
+
   function abrirPlayer(v){
-    playerTitle.textContent = v.title || '';
+    tituloAtual = v.title || '';
+    playerTitle.textContent = tituloAtual;
     playerArea.innerHTML = '';
     if(v.type === 'youtube'){
       var iframe = document.createElement('iframe');
@@ -315,25 +460,35 @@
       iframe.setAttribute('allowfullscreen','');
       playerArea.appendChild(iframe);
     } else {
-      var video = document.createElement('video');
-      video.src = v.url;
-      video.controls = true;
-      video.autoplay = true;
-      playerArea.appendChild(video);
+      tocarDireto(v.url);
     }
+    try { history.pushState({p:1}, ''); } catch(e){}
     playerScreen.classList.remove('hide');
     setTimeout(function(){ btnVoltar.focus(); }, 50);
   }
-  function fecharPlayer(){
+
+  function fecharPlayerReal(){
+    if(hlsAtual){ try { hlsAtual.destroy(); } catch(e){} hlsAtual = null; }
     playerArea.innerHTML = '';
     playerScreen.classList.add('hide');
-    if(focusables.length) focusables[0].focus();
+    if(ultimoFoco && document.body.contains(ultimoFoco)){ ultimoFoco.focus(); }
+    else if(focusables.length){ focusables[0].focus(); }
+  }
+  function fecharPlayer(){
+    if(history.state && history.state.p){ history.back(); } else { fecharPlayerReal(); }
   }
   btnVoltar.addEventListener('click', fecharPlayer);
 
+  window.addEventListener('popstate', function(){
+    if(!playerScreen.classList.contains('hide')){ fecharPlayerReal(); return; }
+    if(emCanais){ sairCanais(); }
+  });
+
+  // ---------- Carregar lista principal ----------
   function carregarVideos(){
     var url = getConfigUrl();
     if(!url){ showConfig(false); return; }
+    emCanais = false;
     msgVazio('Carregando sua lista de vídeos…', null);
     fetch(url, {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.json(); })
@@ -342,6 +497,7 @@
           msgVazio('Sua lista está vazia. Adicione vídeos no arquivo JSON.', 'Trocar link da lista', function(){ showConfig(true); });
           return;
         }
+        listaPrincipal = data;
         renderGrid(data);
       })
       .catch(function(){
