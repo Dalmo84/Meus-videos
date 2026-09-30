@@ -121,6 +121,15 @@
     margin-left:auto;
   }
   #btnVlc:focus{outline:none; box-shadow:var(--focus); border-color:var(--accent)}
+  #btnAnterior, #btnProxima{
+    background:rgba(255,255,255,.12); color:var(--text); border:2px solid transparent;
+    border-radius:8px; padding:8px 14px; font-size:15px; cursor:pointer;
+  }
+  #btnAnterior:focus, #btnProxima:focus{outline:none; box-shadow:var(--focus); border-color:var(--accent)}
+  audio.audioPlayer{
+    width:min(90%, 640px); accent-color:var(--accent);
+  }
+  #playerArea{width:100%; height:100%; display:flex; align-items:center; justify-content:center}
 
   /* ---------- Tela de escolha de player ---------- */
   #escolha{
@@ -185,6 +194,8 @@
 <div id="player" class="hide">
   <div id="playerBar">
     <button id="btnVoltar" tabindex="0">‹ Voltar</button>
+    <button id="btnAnterior" class="hide" tabindex="0">⏮ Anterior</button>
+    <button id="btnProxima" class="hide" tabindex="0">Próxima ⏭</button>
     <span id="playerTitle"></span>
     <a id="btnVlc" class="hide" tabindex="0">Sem som? Abrir no VLC</a>
   </div>
@@ -204,6 +215,8 @@
   var playerArea = document.getElementById('playerArea');
   var playerTitle = document.getElementById('playerTitle');
   var btnVoltar = document.getElementById('btnVoltar');
+  var btnAnterior = document.getElementById('btnAnterior');
+  var btnProxima = document.getElementById('btnProxima');
   var btnVlc = document.getElementById('btnVlc');
   var escolhaScreen = document.getElementById('escolha');
   var escolhaTitulo = document.getElementById('escolhaTitulo');
@@ -222,6 +235,12 @@
   var hlsAtual = null;
   var ultimoFoco = null;
   var tituloAtual = '';
+  var itensAtuais = [];   // lista (grade) de onde o item aberto veio
+  var indiceAtual = -1;   // posição do item aberto dentro de itensAtuais
+
+  function ehAudio(url){
+    return /\.(mp3|m4a|aac|ogg|oga|wav|flac|opus)(\?|#|$)/i.test(url || '');
+  }
 
   function getConfigUrl(){
     try { return localStorage.getItem(STORAGE_KEY) || ''; } catch(e){ return ''; }
@@ -276,6 +295,7 @@
   function renderGrid(videos, modoCanais, total){
     grid.innerHTML = '';
     focusables = [];
+    itensAtuais = videos;
 
     var obs = null;
     if('IntersectionObserver' in window){
@@ -428,9 +448,19 @@
 
   function abrirItem(v){
     ultimoFoco = document.activeElement;
+    indiceAtual = itensAtuais.indexOf(v);
     if(ehLista(v)) abrirLista(v);
     else if(v.type === 'youtube') abrirPlayer(v);
     else mostrarEscolha(v);
+  }
+
+  /** Toca o item indiceAtual+delta da lista atual, direto (sem tela de escolha) — usado por Próxima/Anterior e pelo fim automático de faixa. */
+  function trocarFaixa(delta){
+    var alvo = indiceAtual + delta;
+    if(alvo < 0 || alvo >= itensAtuais.length) return false;
+    indiceAtual = alvo;
+    abrirPlayer(itensAtuais[alvo]);
+    return true;
   }
 
   function mostrarEscolha(v){
@@ -498,7 +528,9 @@
   }
 
   function tocarDireto(url){
-    var video = document.createElement('video');
+    var souAudio = ehAudio(url);
+    var video = document.createElement(souAudio ? 'audio' : 'video');
+    if(souAudio) video.className = 'audioPlayer';
     video.controls = true;
     video.autoplay = true;
     video.setAttribute('playsinline','');
@@ -530,6 +562,10 @@
       if(!usouHls && usarHls()) return;
       falhou();
     });
+    // Quando a faixa/vídeo termina, avança sozinho para o próximo item da lista (se houver)
+    video.addEventListener('ended', function(){
+      trocarFaixa(1);
+    });
   }
 
   function montarLinkVlc(url){
@@ -549,12 +585,22 @@
       iframe.setAttribute('allowfullscreen','');
       playerArea.appendChild(iframe);
       btnVlc.classList.add('hide');
+      btnAnterior.classList.add('hide');
+      btnProxima.classList.add('hide');
       playerFocusables = [btnVoltar];
     } else {
       tocarDireto(v.url);
       btnVlc.href = montarLinkVlc(v.url);
       btnVlc.classList.remove('hide');
-      playerFocusables = [btnVoltar, btnVlc];
+      playerFocusables = [btnVoltar];
+
+      var temAnterior = indiceAtual > 0;
+      var temProxima = indiceAtual >= 0 && indiceAtual < itensAtuais.length - 1;
+      btnAnterior.classList.toggle('hide', !temAnterior);
+      btnProxima.classList.toggle('hide', !temProxima);
+      if(temAnterior) playerFocusables.push(btnAnterior);
+      if(temProxima) playerFocusables.push(btnProxima);
+      playerFocusables.push(btnVlc);
     }
     try { history.pushState({p:1}, ''); } catch(e){}
     playerScreen.classList.remove('hide');
@@ -572,6 +618,8 @@
     if(history.state && history.state.p){ history.back(); } else { fecharPlayerReal(); }
   }
   btnVoltar.addEventListener('click', fecharPlayer);
+  btnAnterior.addEventListener('click', function(){ trocarFaixa(-1); });
+  btnProxima.addEventListener('click', function(){ trocarFaixa(1); });
 
   window.addEventListener('popstate', function(){
     if(!playerScreen.classList.contains('hide')){ fecharPlayerReal(); return; }
