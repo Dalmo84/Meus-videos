@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Meus Vídeos",
-  "short_name": "Meus Vídeos",
-  "description": "App pessoal para assistir minha lista de vídeos do YouTube e vídeos diretos, feito para Android TV.",
+  "name": "StreamDalmo",
+  "short_name": "StreamDalmo",
+  "description": "App pessoal para assistir playlists, filmes e músicas, feito para Android TV e celular.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "fullscreen",
