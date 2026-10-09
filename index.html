@@ -132,6 +132,10 @@
   #playerArea{width:100%; height:100%; display:flex; align-items:center; justify-content:center}
 
   /* ---------- Tela de escolha de player ---------- */
+  #senha{
+    position:fixed; inset:0; background:rgba(10,11,16,.92); z-index:26;
+    display:flex; align-items:center; justify-content:center; padding:40px;
+  }
   #escolha{
     position:fixed; inset:0; background:rgba(10,11,16,.88); z-index:25;
     display:flex; align-items:center; justify-content:center; padding:40px;
@@ -173,6 +177,20 @@
     <div>
       <button id="btnSalvar" tabindex="0">Salvar</button>
       <button id="btnCancelar" class="secundario hide" tabindex="0">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Senha de acesso (opcional, por card) -->
+<div id="senha" class="hide">
+  <div class="configBox">
+    <h2 id="senhaTitulo">Conteúdo protegido</h2>
+    <p>Digite a senha para abrir.</p>
+    <input id="senhaInput" type="password" placeholder="Senha" tabindex="0" inputmode="numeric">
+    <p id="senhaErro" class="hide" style="color:#ff8a7a; margin-top:-10px;">Senha incorreta, tente de novo.</p>
+    <div>
+      <button id="senhaConfirmar" tabindex="0">Confirmar</button>
+      <button id="senhaCancelar" class="secundario" tabindex="0">Cancelar</button>
     </div>
   </div>
 </div>
@@ -224,6 +242,15 @@
   var escolhaVlc = document.getElementById('escolhaVlc');
   var escolhaCancelar = document.getElementById('escolhaCancelar');
   var escolhaFocusables = [escolhaApp, escolhaVlc, escolhaCancelar];
+
+  var senhaScreen = document.getElementById('senha');
+  var senhaTitulo = document.getElementById('senhaTitulo');
+  var senhaInput = document.getElementById('senhaInput');
+  var senhaErro = document.getElementById('senhaErro');
+  var senhaConfirmar = document.getElementById('senhaConfirmar');
+  var senhaCancelar = document.getElementById('senhaCancelar');
+  var senhaFocusables = [senhaInput, senhaConfirmar, senhaCancelar];
+  var SESSAO_DESBLOQUEADOS = 'meusvideos_desbloqueados';
 
   var STORAGE_KEY = 'meusvideos_config_url';
   var MAX_CANAIS = 300;
@@ -386,6 +413,18 @@
   document.addEventListener('keydown', function(e){
     if(!configScreen.classList.contains('hide')) return;
     var isBack = (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack');
+    if(!senhaScreen.classList.contains('hide')){
+      if(isBack){ e.preventDefault(); senhaCancelar.onclick(); return; }
+      if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        var sidx = senhaFocusables.indexOf(document.activeElement);
+        var salvo = e.key === 'ArrowDown' ? sidx+1 : sidx-1;
+        if(salvo >= 0 && salvo < senhaFocusables.length){
+          e.preventDefault();
+          senhaFocusables[salvo].focus();
+        }
+      }
+      return;
+    }
     if(!escolhaScreen.classList.contains('hide')){
       if(isBack){ e.preventDefault(); esconderEscolha(); return; }
       if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
@@ -449,9 +488,57 @@
   function abrirItem(v){
     ultimoFoco = document.activeElement;
     indiceAtual = itensAtuais.indexOf(v);
-    if(ehLista(v)) abrirLista(v);
-    else if(v.type === 'youtube') abrirPlayer(v);
-    else mostrarEscolha(v);
+    verificarSenha(v, function(){
+      if(ehLista(v)) abrirLista(v);
+      else if(v.type === 'youtube') abrirPlayer(v);
+      else mostrarEscolha(v);
+    });
+  }
+
+  // ---------- Senha opcional por card ----------
+  function chaveSessao(v){ return (v.title || '') + '|' + (v.senha || ''); }
+  function estaDesbloqueado(v){
+    try {
+      var lista = JSON.parse(sessionStorage.getItem(SESSAO_DESBLOQUEADOS) || '[]');
+      return lista.indexOf(chaveSessao(v)) !== -1;
+    } catch(e){ return false; }
+  }
+  function marcarDesbloqueado(v){
+    try {
+      var lista = JSON.parse(sessionStorage.getItem(SESSAO_DESBLOQUEADOS) || '[]');
+      lista.push(chaveSessao(v));
+      sessionStorage.setItem(SESSAO_DESBLOQUEADOS, JSON.stringify(lista));
+    } catch(e){}
+  }
+
+  /** Se v.senha existir e ainda não foi desbloqueado nesta sessão, pede a senha antes de prosseguir() */
+  function verificarSenha(v, prosseguir){
+    if(!v.senha || estaDesbloqueado(v)){ prosseguir(); return; }
+
+    senhaTitulo.textContent = v.title ? ('"' + v.title + '" é protegido') : 'Conteúdo protegido';
+    senhaInput.value = '';
+    senhaErro.classList.add('hide');
+    senhaScreen.classList.remove('hide');
+    setTimeout(function(){ senhaInput.focus(); }, 50);
+
+    function tentar(){
+      if(String(v.senha) === senhaInput.value){
+        senhaScreen.classList.add('hide');
+        marcarDesbloqueado(v);
+        prosseguir();
+      } else {
+        senhaErro.classList.remove('hide');
+        senhaInput.value = '';
+        senhaInput.focus();
+      }
+    }
+    function cancelar(){
+      senhaScreen.classList.add('hide');
+      if(ultimoFoco && document.body.contains(ultimoFoco)) ultimoFoco.focus();
+    }
+    senhaConfirmar.onclick = tentar;
+    senhaCancelar.onclick = cancelar;
+    senhaInput.onkeydown = function(e){ if(e.key === 'Enter'){ e.preventDefault(); tentar(); } };
   }
 
   /** Toca o item indiceAtual+delta da lista atual, direto (sem tela de escolha) — usado por Próxima/Anterior e pelo fim automático de faixa. */
