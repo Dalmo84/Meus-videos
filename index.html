@@ -379,7 +379,7 @@
 
       var badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = (v.type === 'youtube') ? 'YouTube' : (ehLista(v) ? 'Lista' : 'Vídeo');
+      badge.textContent = (v.type === 'youtube') ? 'YouTube' : (v.type === 'pasta' ? 'Pasta' : (ehLista(v) ? 'Lista' : 'Vídeo'));
       card.appendChild(badge);
 
       var title = document.createElement('div');
@@ -465,7 +465,7 @@
 
   // ---------- Listas M3U ----------
   function ehLista(v){
-    return v.type === 'm3u' || /\.m3u(\?|#|$)/i.test(v.url || '');
+    return v.type === 'm3u' || v.type === 'pasta' || /\.m3u(\?|#|$)/i.test(v.url || '');
   }
 
   function parseM3U(texto){
@@ -564,6 +564,17 @@
   }
 
   function abrirLista(v){
+    if(v.type === 'pasta'){
+      var itens = Array.isArray(v.items) ? v.items : [];
+      if(!itens.length){
+        msgVazio('Essa pasta está vazia.', 'Voltar', function(){ renderGrid(listaPrincipal); });
+        return;
+      }
+      emCanais = true;
+      try { history.pushState({c:1}, ''); } catch(e){}
+      renderGrid(itens, true, itens.length);
+      return;
+    }
     msgVazio('Carregando canais…', null);
     fetch(v.url, {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.text(); })
