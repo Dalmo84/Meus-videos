@@ -121,6 +121,12 @@
     margin-left:auto;
   }
   #btnVlc:focus{outline:none; box-shadow:var(--focus); border-color:var(--accent)}
+  #btnCast{
+    background:rgba(232,163,61,.15); color:var(--accent); border:2px solid transparent;
+    border-radius:8px; padding:8px 14px; font-size:15px; cursor:pointer;
+  }
+  #btnCast:focus{outline:none; box-shadow:var(--focus); border-color:var(--accent)}
+  #btnCast.ativo{background:var(--accent); color:#1b1409}
   #btnAnterior, #btnProxima{
     background:rgba(255,255,255,.12); color:var(--text); border:2px solid transparent;
     border-radius:8px; padding:8px 14px; font-size:15px; cursor:pointer;
@@ -215,12 +221,14 @@
     <button id="btnAnterior" class="hide" tabindex="0">⏮ Anterior</button>
     <button id="btnProxima" class="hide" tabindex="0">Próxima ⏭</button>
     <span id="playerTitle"></span>
+    <button id="btnCast" class="hide" tabindex="0">📺 Transmitir pra TV</button>
     <a id="btnVlc" class="hide" tabindex="0">Sem som? Abrir no VLC</a>
   </div>
   <div id="playerArea"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
+<script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 <script>
 (function(){
   var grid = document.getElementById('grid');
@@ -236,6 +244,10 @@
   var btnAnterior = document.getElementById('btnAnterior');
   var btnProxima = document.getElementById('btnProxima');
   var btnVlc = document.getElementById('btnVlc');
+  var btnCast = document.getElementById('btnCast');
+  var castDisponivel = false;
+  var itemParaTransmitir = null;
+  var modoBtnCast = 'sdk'; // 'sdk' (cast direto) ou 'youtube' (abre no app oficial)
   var escolhaScreen = document.getElementById('escolha');
   var escolhaTitulo = document.getElementById('escolhaTitulo');
   var escolhaApp = document.getElementById('escolhaApp');
@@ -666,6 +678,64 @@
     });
   }
 
+  // ---------- Transmitir pra TV (Google Cast) ----------
+  window['__onGCastApiAvailable'] = function(ok){
+    if(!ok || !window.cast || !window.chrome || !chrome.cast) return;
+    try {
+      cast.framework.CastContext.getInstance().setOptions({
+        receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+        autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+      });
+      castDisponivel = true;
+      cast.framework.CastContext.getInstance().addEventListener(
+        cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+        function(e){
+          var S = cast.framework.SessionState;
+          if(e.sessionState === S.SESSION_STARTED || e.sessionState === S.SESSION_RESUMED){
+            btnCast.classList.add('ativo');
+            btnCast.textContent = '📺 Transmitindo…';
+            if(itemParaTransmitir) carregarNoCast(itemParaTransmitir);
+          } else if(e.sessionState === S.SESSION_ENDED){
+            btnCast.classList.remove('ativo');
+            btnCast.textContent = '📺 Transmitir pra TV';
+          }
+        }
+      );
+    } catch(e){ /* SDK ainda carregando ou indisponível neste navegador */ }
+  };
+
+  function tipoMidiaCast(url){
+    if(/\.m3u8(\?|#|$)/i.test(url)) return 'application/x-mpegURL';
+    if(ehAudio(url)) return 'audio/mpeg';
+    return 'video/mp4';
+  }
+
+  function carregarNoCast(v){
+    var session = cast.framework.CastContext.getInstance().getCurrentSession();
+    if(!session) return;
+    var mediaInfo = new chrome.cast.media.MediaInfo(v.url, tipoMidiaCast(v.url));
+    mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+    mediaInfo.metadata.title = v.title || '';
+    session.loadMedia(new chrome.cast.media.LoadRequest(mediaInfo)).catch(function(){
+      btnCast.textContent = '📺 Não foi possível transmitir';
+    });
+  }
+
+  function alternarCast(){
+    if(modoBtnCast === 'youtube'){
+      if(itemParaTransmitir) window.open(itemParaTransmitir.url, '_blank');
+      return;
+    }
+    if(!castDisponivel) return;
+    var ctx = cast.framework.CastContext.getInstance();
+    if(ctx.getCurrentSession()){
+      if(itemParaTransmitir) carregarNoCast(itemParaTransmitir);
+    } else {
+      ctx.requestSession().catch(function(){ /* usuário cancelou a escolha do dispositivo */ });
+    }
+  }
+  btnCast.addEventListener('click', alternarCast);
+
   function montarLinkVlc(url){
     var semEsquema = url.replace(/^https?:\/\//i, '');
     var scheme = /^https:/i.test(url) ? 'https' : 'http';
@@ -683,14 +753,31 @@
       iframe.setAttribute('allowfullscreen','');
       playerArea.appendChild(iframe);
       btnVlc.classList.add('hide');
+      btnCast.classList.add('hide');
       btnAnterior.classList.add('hide');
       btnProxima.classList.add('hide');
+      itemParaTransmitir = null;
       playerFocusables = [btnVoltar];
     } else {
       tocarDireto(v.url);
       btnVlc.href = montarLinkVlc(v.url);
       btnVlc.classList.remove('hide');
+      itemParaTransmitir = v;
+      modoBtnCast = 'sdk';
       playerFocusables = [btnVoltar];
+
+      if(castDisponivel){
+        btnCast.classList.remove('hide');
+        btnCast.textContent = '📺 Transmitir pra TV';
+        playerFocusables.push(btnCast);
+        // Se já tem uma sessão ativa, continua transmitindo o item novo automaticamente
+        try {
+          var sessaoAtual = cast.framework.CastContext.getInstance().getCurrentSession();
+          if(sessaoAtual) carregarNoCast(v);
+        } catch(e){}
+      } else {
+        btnCast.classList.add('hide');
+      }
 
       var temAnterior = indiceAtual > 0;
       var temProxima = indiceAtual >= 0 && indiceAtual < itensAtuais.length - 1;
