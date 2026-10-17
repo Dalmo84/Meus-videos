@@ -713,7 +713,9 @@
   function carregarNoCast(v){
     var session = cast.framework.CastContext.getInstance().getCurrentSession();
     if(!session) return;
+    var ehAoVivo = /\.m3u8(\?|#|$)/i.test(v.url || '');
     var mediaInfo = new chrome.cast.media.MediaInfo(v.url, tipoMidiaCast(v.url));
+    mediaInfo.streamType = ehAoVivo ? chrome.cast.media.StreamType.LIVE : chrome.cast.media.StreamType.BUFFERED;
     mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
     mediaInfo.metadata.title = v.title || '';
     session.loadMedia(new chrome.cast.media.LoadRequest(mediaInfo)).catch(function(){
