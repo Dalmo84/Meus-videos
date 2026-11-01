@@ -487,6 +487,16 @@
     }
     if(!playerScreen.classList.contains('hide')){
       if(isBack){ e.preventDefault(); fecharPlayer(); return; }
+      var mediaV = playerArea.querySelector('video');
+      if(mediaV && playerFocusables.indexOf(document.activeElement) === -1){
+        if(e.key === 'Enter' || e.key === ' '){
+          e.preventDefault();
+          if(mediaV.paused){ var pr = mediaV.play(); if(pr && pr.catch) pr.catch(function(){}); } else { mediaV.pause(); }
+          return;
+        }
+        if(e.key === 'ArrowRight'){ e.preventDefault(); mediaV.currentTime = mediaV.currentTime + 10; return; }
+        if(e.key === 'ArrowLeft'){ e.preventDefault(); mediaV.currentTime = Math.max(0, mediaV.currentTime - 10); return; }
+      }
       if(e.key === 'ArrowUp' && playerFocusables.indexOf(document.activeElement) === -1){
         e.preventDefault(); btnVoltar.focus(); return;
       }
@@ -789,6 +799,8 @@
   }
   function mostrarBarra(){
     playerBar.classList.remove('oculto');
+    var mv = playerArea.querySelector('video');
+    if(mv) mv.controls = true;
     clearTimeout(barraTimer);
     if(barraFixa || playerSemAutoOcultar()) return;
     barraTimer = setTimeout(esconderBarra, 3500);
@@ -797,9 +809,12 @@
     if(playerScreen.classList.contains('hide') || barraFixa) return;
     playerBar.classList.add('oculto');
     var media = playerArea.querySelector('video');
-    if(media && playerFocusables.indexOf(document.activeElement) !== -1){
-      media.setAttribute('tabindex','-1');
-      media.focus();
+    if(media){
+      media.controls = false;
+      if(playerFocusables.indexOf(document.activeElement) !== -1){
+        media.setAttribute('tabindex','-1');
+        media.focus();
+      }
     }
   }
   ['keydown','mousemove','touchstart','click'].forEach(function(ev){
