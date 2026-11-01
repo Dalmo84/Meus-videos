@@ -692,6 +692,7 @@
     if(souAudio) video.className = 'audioPlayer';
     video.controls = true;
     video.autoplay = true;
+    video.preload = 'auto';
     video.setAttribute('playsinline','');
     playerArea.appendChild(video);
 
@@ -699,7 +700,10 @@
     function usarHls(){
       if(window.Hls && Hls.isSupported()){
         usouHls = true;
-        hlsAtual = new Hls();
+        hlsAtual = new Hls({
+          maxBufferLength: 60, maxMaxBufferLength: 120, backBufferLength: 30,
+          liveSyncDurationCount: 5, enableWorker: true
+        });
         hlsAtual.on(Hls.Events.ERROR, function(ev, data){ if(data && data.fatal) falhou(); });
         hlsAtual.loadSource(url);
         hlsAtual.attachMedia(video);
