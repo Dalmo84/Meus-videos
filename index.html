@@ -120,6 +120,8 @@
     display:flex; align-items:center; gap:14px; z-index:31;
     padding-top: calc(16px + env(safe-area-inset-top,0px));
   }
+  #playerBar{transition:opacity .25s ease}
+  #playerBar.oculto{opacity:0; pointer-events:none}
   #btnVoltar{
     background:rgba(255,255,255,.12); color:var(--text); border:2px solid transparent;
     border-radius:8px; padding:8px 14px; font-size:15px; cursor:pointer;
@@ -272,6 +274,9 @@
   var playerArea = document.getElementById('playerArea');
   var playerTitle = document.getElementById('playerTitle');
   var btnVoltar = document.getElementById('btnVoltar');
+  var playerBar = document.getElementById('playerBar');
+  var barraTimer = null;
+  var barraFixa = false; // true quando há erro: a barra fica sempre visível
   var btnAnterior = document.getElementById('btnAnterior');
   var btnProxima = document.getElementById('btnProxima');
   var btnVlc = document.getElementById('btnVlc');
@@ -482,7 +487,10 @@
     }
     if(!playerScreen.classList.contains('hide')){
       if(isBack){ e.preventDefault(); fecharPlayer(); return; }
-      if((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && playerFocusables.length > 1){
+      if(e.key === 'ArrowUp' && playerFocusables.indexOf(document.activeElement) === -1){
+        e.preventDefault(); btnVoltar.focus(); return;
+      }
+      if((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && playerFocusables.length > 1 && playerFocusables.indexOf(document.activeElement) !== -1){
         var pidx = playerFocusables.indexOf(document.activeElement);
         var palvo = e.key === 'ArrowRight' ? pidx+1 : pidx-1;
         if(palvo >= 0 && palvo < playerFocusables.length){
@@ -690,6 +698,7 @@
       return false;
     }
     function falhou(){
+      barraFixa = true; clearTimeout(barraTimer); playerBar.classList.remove('oculto');
       var dica = /^http:/i.test(url) ? ' (links http:// podem ser bloqueados)' : '';
       playerTitle.textContent = tituloAtual + ' — não foi possível reproduzir este link' + dica;
     }
@@ -775,7 +784,32 @@
     return 'intent://' + semEsquema + '#Intent;scheme=' + scheme + ';package=org.videolan.vlc;type=video/*;end';
   }
 
+  function playerSemAutoOcultar(){
+    return !!playerArea.querySelector('iframe, audio');
+  }
+  function mostrarBarra(){
+    playerBar.classList.remove('oculto');
+    clearTimeout(barraTimer);
+    if(barraFixa || playerSemAutoOcultar()) return;
+    barraTimer = setTimeout(esconderBarra, 3500);
+  }
+  function esconderBarra(){
+    if(playerScreen.classList.contains('hide') || barraFixa) return;
+    playerBar.classList.add('oculto');
+    var media = playerArea.querySelector('video');
+    if(media && playerFocusables.indexOf(document.activeElement) !== -1){
+      media.setAttribute('tabindex','-1');
+      media.focus();
+    }
+  }
+  ['keydown','mousemove','touchstart','click'].forEach(function(ev){
+    document.addEventListener(ev, function(){
+      if(!playerScreen.classList.contains('hide')) mostrarBarra();
+    }, true);
+  });
+
   function abrirPlayer(v){
+    barraFixa = false;
     tituloAtual = v.title || '';
     playerTitle.textContent = tituloAtual;
     playerArea.innerHTML = '';
@@ -823,9 +857,11 @@
     try { history.pushState({p:1}, ''); } catch(e){}
     playerScreen.classList.remove('hide');
     setTimeout(function(){ btnVoltar.focus(); }, 50);
+    mostrarBarra();
   }
 
   function fecharPlayerReal(){
+    clearTimeout(barraTimer); barraFixa = false; playerBar.classList.remove('oculto');
     if(hlsAtual){ try { hlsAtual.destroy(); } catch(e){} hlsAtual = null; }
     playerArea.innerHTML = '';
     playerScreen.classList.add('hide');
