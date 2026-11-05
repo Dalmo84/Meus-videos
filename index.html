@@ -176,6 +176,28 @@
   .voltarCard{display:flex;align-items:center;justify-content:center;min-height:120px;padding:16px;color:var(--accent);font-weight:700;font-size:18px;text-align:center}
   .aviso{grid-column:1/-1;color:var(--muted);font-size:15px;padding:0 4px}
 
+  /* ---------- Visor de imagens ---------- */
+  #visor{
+    position:fixed; inset:0; background:#000; z-index:32;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #visorImg{max-width:100%; max-height:100%; object-fit:contain; display:block}
+  #visorBar{
+    position:fixed; top:0; left:0; right:0; z-index:33;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:14px 24px; padding-top:calc(14px + env(safe-area-inset-top,0px));
+    background:linear-gradient(rgba(0,0,0,.78), transparent);
+    transition:opacity .25s ease;
+  }
+  #visorBar.oculto{opacity:0; pointer-events:none}
+  #visorBar button{
+    background:rgba(255,255,255,.12); color:var(--text); border:2px solid transparent;
+    border-radius:8px; padding:8px 14px; font-size:15px; cursor:pointer;
+  }
+  #visorBar button:disabled{opacity:.35; cursor:default}
+  #visorBar button:focus{outline:none; box-shadow:var(--focus); border-color:var(--accent)}
+  #visorInfo{font-size:15px; color:var(--muted); margin-left:6px}
+
   /* ---------- Celular (telas estreitas) ---------- */
   @media (max-width: 680px){
     header{padding:18px 18px 16px; flex-wrap:wrap; gap:12px}
@@ -247,6 +269,17 @@
   </div>
 </div>
 
+<!-- Visor de imagens (revistas, fotos) -->
+<div id="visor" class="hide">
+  <div id="visorBar">
+    <button id="visorVoltar" tabindex="0">‹ Voltar</button>
+    <button id="visorAnterior" tabindex="0">‹ Anterior</button>
+    <button id="visorProxima" tabindex="0">Próxima ›</button>
+    <span id="visorInfo"></span>
+  </div>
+  <img id="visorImg" alt="">
+</div>
+
 <!-- Player -->
 <div id="player" class="hide">
   <div id="playerBar">
@@ -275,6 +308,14 @@
   var playerTitle = document.getElementById('playerTitle');
   var btnVoltar = document.getElementById('btnVoltar');
   var playerBar = document.getElementById('playerBar');
+  var visorScreen = document.getElementById('visor');
+  var visorImg = document.getElementById('visorImg');
+  var visorBar = document.getElementById('visorBar');
+  var visorInfo = document.getElementById('visorInfo');
+  var visorVoltar = document.getElementById('visorVoltar');
+  var visorAnterior = document.getElementById('visorAnterior');
+  var visorProxima = document.getElementById('visorProxima');
+  var imagensAtuais = [], imagemIdx = 0, visorTimer = null, toqueX = null;
   var barraTimer = null;
   var barraFixa = false; // true quando há erro: a barra fica sempre visível
   var btnAnterior = document.getElementById('btnAnterior');
@@ -427,7 +468,7 @@
 
       var badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = (v.type === 'youtube') ? 'YouTube' : (v.type === 'pasta' ? 'Pasta' : (ehLista(v) ? 'Lista' : 'Vídeo'));
+      badge.textContent = (v.type === 'youtube') ? 'YouTube' : (v.type === 'pasta' ? 'Pasta' : (v.type === 'archive' ? 'Galeria' : ((v.type === 'imagem' || ehImagem(v.url)) ? 'Imagem' : (ehLista(v) ? 'Lista' : 'Vídeo'))));
       card.appendChild(badge);
 
       var title = document.createElement('div');
@@ -461,6 +502,12 @@
   document.addEventListener('keydown', function(e){
     if(!configScreen.classList.contains('hide')) return;
     var isBack = (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack');
+    if(!visorScreen.classList.contains('hide')){
+      if(isBack){ e.preventDefault(); fecharVisor(); return; }
+      if(e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown'){ e.preventDefault(); mudarImagem(1); return; }
+      if(e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp'){ e.preventDefault(); mudarImagem(-1); return; }
+      return;
+    }
     if(!senhaScreen.classList.contains('hide')){
       if(isBack){ e.preventDefault(); senhaCancelar.onclick(); return; }
       if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
@@ -526,7 +573,7 @@
 
   // ---------- Listas M3U ----------
   function ehLista(v){
-    return v.type === 'm3u' || v.type === 'pasta' || /\.m3u(\?|#|$)/i.test(v.url || '');
+    return v.type === 'm3u' || v.type === 'pasta' || v.type === 'archive' || /\.m3u(\?|#|$)/i.test(v.url || '');
   }
 
   function parseM3U(texto){
@@ -539,7 +586,7 @@
         var logo = (l.match(/tvg-logo="([^"]*)"/) || [])[1] || '';
         atual = { title: nome || 'Canal', thumbnail: logo, type: 'direct' };
       } else if(l.charAt(0) !== '#'){
-        if(atual){ atual.url = l; lista.push(atual); atual = null; }
+        if(atual){ atual.url = l; if(!atual.thumbnail && ehImagem(l)) atual.thumbnail = l; lista.push(atual); atual = null; }
         else { lista.push({ title: l.split('/').pop() || 'Vídeo', thumbnail: '', url: l, type: 'direct' }); }
       }
     });
@@ -552,6 +599,7 @@
     verificarSenha(v, function(){
       if(ehLista(v)) abrirLista(v);
       else if(v.type === 'youtube') abrirPlayer(v);
+      else if(v.type === 'imagem' || ehImagem(v.url)) abrirVisor(v);
       else mostrarEscolha(v);
     });
   }
@@ -625,6 +673,36 @@
   }
 
   function abrirLista(v){
+    if(v.type === 'archive'){
+      var mid = v.id || ((v.url || '').match(/archive\.org\/(?:details|download)\/([^\/?#]+)/) || [])[1] || '';
+      if(!mid){
+        msgVazio('Link do Archive.org inválido.', 'Voltar', function(){ renderGrid(listaPrincipal); });
+        return;
+      }
+      msgVazio('Carregando imagens…', null);
+      fetch('https://archive.org/metadata/' + encodeURIComponent(mid), {cache:'no-store'})
+        .then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.json(); })
+        .then(function(meta){
+          var files = (meta.files || []).filter(function(f){ return ehImagem(f.name) && f.name.indexOf('__ia_thumb') === -1; });
+          var originais = files.filter(function(f){ return f.source === 'original'; });
+          if(originais.length) files = originais;
+          files.sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); });
+          if(!files.length) throw new Error('sem imagens');
+          var itens = files.map(function(f){
+            var url = 'https://archive.org/download/' + encodeURIComponent(mid) + '/' + f.name.split('/').map(encodeURIComponent).join('/');
+            var nome = f.name.split('/').pop().replace(/\.[^.]+$/, '').replace(/_+/g, ' ');
+            return { title: nome, thumbnail: url, url: url, type: 'imagem' };
+          });
+          emCanais = true;
+          try { history.pushState({c:1}, ''); } catch(e){}
+          renderGrid(itens.slice(0, MAX_CANAIS), true, itens.length);
+        })
+        .catch(function(){
+          emCanais = false;
+          msgVazio('Não foi possível abrir essa galeria. Confira o link do Archive.org.', 'Voltar', function(){ renderGrid(listaPrincipal); });
+        });
+      return;
+    }
     if(v.type === 'pasta'){
       var itens = Array.isArray(v.items) ? v.items : [];
       if(!itens.length){
@@ -798,6 +876,64 @@
     return 'intent://' + semEsquema + '#Intent;scheme=' + scheme + ';package=org.videolan.vlc;type=video/*;end';
   }
 
+  // ---------- Visor de imagens ----------
+  function ehImagem(url){ return /\.(jpe?g|png|webp|gif|avif|bmp)(\?|#|$)/i.test(url || ''); }
+
+  function mostrarBarraVisor(){
+    visorBar.classList.remove('oculto');
+    clearTimeout(visorTimer);
+    visorTimer = setTimeout(function(){ visorBar.classList.add('oculto'); }, 3500);
+  }
+  function mostrarImagem(){
+    var i = imagemIdx, v = imagensAtuais[i];
+    visorInfo.textContent = 'Carregando…';
+    visorImg.onload = function(){ visorInfo.textContent = (i+1) + ' / ' + imagensAtuais.length + (v.title ? ' — ' + v.title : ''); };
+    visorImg.onerror = function(){ visorInfo.textContent = 'Não foi possível carregar esta imagem'; };
+    visorImg.src = v.url;
+    var prox = imagensAtuais[i+1];
+    if(prox){ (new Image()).src = prox.url; }
+    visorAnterior.disabled = (i <= 0);
+    visorProxima.disabled = (i >= imagensAtuais.length - 1);
+  }
+  function mudarImagem(d){
+    var alvo = imagemIdx + d;
+    if(alvo < 0 || alvo >= imagensAtuais.length) return;
+    imagemIdx = alvo;
+    mostrarImagem();
+    mostrarBarraVisor();
+  }
+  function abrirVisor(v){
+    imagensAtuais = itensAtuais.filter(function(x){ return x.type === 'imagem' || ehImagem(x.url); });
+    imagemIdx = imagensAtuais.indexOf(v);
+    if(imagemIdx < 0){ imagensAtuais = [v]; imagemIdx = 0; }
+    visorScreen.classList.remove('hide');
+    try { history.pushState({i:1}, ''); } catch(e){}
+    mostrarImagem();
+    mostrarBarraVisor();
+    setTimeout(function(){ if(!visorProxima.disabled) visorProxima.focus(); else visorVoltar.focus(); }, 50);
+  }
+  function fecharVisorReal(){
+    clearTimeout(visorTimer);
+    visorScreen.classList.add('hide');
+    visorImg.removeAttribute('src');
+    if(ultimoFoco && document.body.contains(ultimoFoco)) ultimoFoco.focus();
+  }
+  function fecharVisor(){
+    if(history.state && history.state.i){ history.back(); } else { fecharVisorReal(); }
+  }
+  visorVoltar.addEventListener('click', fecharVisor);
+  visorAnterior.addEventListener('click', function(){ mudarImagem(-1); });
+  visorProxima.addEventListener('click', function(){ mudarImagem(1); });
+  visorScreen.addEventListener('touchstart', function(e){
+    toqueX = (e.touches.length === 1) ? e.touches[0].clientX : null;
+  }, {passive:true});
+  visorScreen.addEventListener('touchend', function(e){
+    if(toqueX === null) return;
+    var dx = e.changedTouches[0].clientX - toqueX;
+    toqueX = null;
+    if(Math.abs(dx) > 60) mudarImagem(dx < 0 ? 1 : -1);
+  }, {passive:true});
+
   function playerSemAutoOcultar(){
     return !!playerArea.querySelector('iframe, audio');
   }
@@ -824,6 +960,7 @@
   ['keydown','mousemove','touchstart','click'].forEach(function(ev){
     document.addEventListener(ev, function(){
       if(!playerScreen.classList.contains('hide')) mostrarBarra();
+      if(!visorScreen.classList.contains('hide')) mostrarBarraVisor();
     }, true);
   });
 
@@ -895,6 +1032,7 @@
   btnProxima.addEventListener('click', function(){ trocarFaixa(1); });
 
   window.addEventListener('popstate', function(){
+    if(!visorScreen.classList.contains('hide')){ fecharVisorReal(); return; }
     if(!playerScreen.classList.contains('hide')){ fecharPlayerReal(); return; }
     if(emCanais){ sairCanais(); }
   });
